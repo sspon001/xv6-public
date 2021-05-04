@@ -225,15 +225,15 @@ fork(void)
 // An exited process remains in the zombie state
 // until its parent calls wait() to find out it exited.
 void
-exit(void)
+exit(int status)
 {
   struct proc *curproc = myproc();
   struct proc *p;
   int fd;
-
   if(curproc == initproc)
     panic("init exiting");
 
+  curproc->exitStatus = status ;
   // Close all open files.
   for(fd = 0; fd < NOFILE; fd++){
     if(curproc->ofile[fd]){
@@ -251,7 +251,6 @@ exit(void)
 
   // Parent might be sleeping in wait().
   wakeup1(curproc->parent);
-
   // Pass abandoned children to init.
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
     if(p->parent == curproc){
@@ -270,7 +269,7 @@ exit(void)
 // Wait for a child process to exit and return its pid.
 // Return -1 if this process has no children.
 int
-wait(void)
+wait(int* status)
 {
   struct proc *p;
   int havekids, pid;
@@ -296,6 +295,7 @@ wait(void)
         p->killed = 0;
         p->state = UNUSED;
         release(&ptable.lock);
+        *status = p->exitStatus ;
         return pid;
       }
     }
@@ -310,6 +310,54 @@ wait(void)
     sleep(curproc, &ptable.lock);  //DOC: wait-sleep
   }
 }
+
+
+// Wait for a specific process to exit and return its pid.
+// Return -1 if this process has no children.
+int
+waitpid(int* status, int _pid)
+{
+    struct proc *p;
+    int found, pid;
+    struct proc *curproc = myproc();
+
+    acquire(&ptable.lock);
+    for(;;){
+        // Scan through table looking for exited children.
+        found = 0 ;
+        for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+            if(p->parent != curproc)
+                continue ;
+            if(p->pid == _pid){
+                // Found one.
+                found = 1 ;
+                pid = p->pid;
+                kfree(p->kstack);
+                p->kstack = 0;
+                freevm(p->pgdir);
+                p->pid = 0;
+                p->parent = 0;
+                p->name[0] = 0;
+                p->killed = 0;
+                p->state = UNUSED;
+                *status = p->exitStatus ;
+                release(&ptable.lock);
+                return pid;
+            }
+        }
+
+        // No point waiting if we don't have any children.
+        if(!found || curproc->killed){
+            release(&ptable.lock);
+            *status = -1 ;
+            return -1;
+        }
+
+        // Wait for children to exit.  (See wakeup1 call in proc_exit.)
+        sleep(curproc, &ptable.lock);  //DOC: wait-sleep
+    }
+}
+
 
 //PAGEBREAK: 42
 // Per-CPU process scheduler.
@@ -531,4 +579,9 @@ procdump(void)
     }
     cprintf("\n");
   }
+}
+
+void
+hello(void) {
+    cprintf("\n\n Hello from your kernel space! \n\n") ;
 }
