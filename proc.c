@@ -326,8 +326,6 @@ waitpid(int* status, int _pid)
         // Scan through table looking for exited children.
         found = 0 ;
         for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-            if(p->parent != curproc)
-                continue ;
             if(p->pid == _pid){
                 // Found one.
                 found = 1 ;
