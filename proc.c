@@ -71,7 +71,7 @@ myproc(void) {
 // state required to run in the kernel.
 // Otherwise return 0.
 static struct proc*
-allocproc(void)
+allocproc()
 {
   struct proc *p;
   char *sp;
@@ -111,6 +111,11 @@ found:
   p->context = (struct context*)sp;
   memset(p->context, 0, sizeof *p->context);
   p->context->eip = (uint)forkret;
+  p->priority = 0 ;
+  p->start_time = 0 ;
+  p->end_time = 0 ;
+  p->burst_time = 0 ;
+  p->prev_tick = 0 ;
 
   return p;
 }
@@ -199,6 +204,7 @@ fork(void)
   np->sz = curproc->sz;
   np->parent = curproc;
   *np->tf = *curproc->tf;
+  np->priority = curproc->priority ;
 
   // Clear %eax so that fork returns 0 in the child.
   np->tf->eax = 0;
@@ -230,10 +236,8 @@ exit(void)
   struct proc *curproc = myproc();
   struct proc *p;
   int fd;
-
   if(curproc == initproc)
     panic("init exiting");
-
   // Close all open files.
   for(fd = 0; fd < NOFILE; fd++){
     if(curproc->ofile[fd]){
@@ -251,7 +255,6 @@ exit(void)
 
   // Parent might be sleeping in wait().
   wakeup1(curproc->parent);
-
   // Pass abandoned children to init.
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
     if(p->parent == curproc){
@@ -263,6 +266,11 @@ exit(void)
 
   // Jump into the scheduler, never to return.
   curproc->state = ZOMBIE;
+  acquire(&tickslock) ;
+  curproc->end_time = ticks ;
+  release(&tickslock) ;
+    cprintf("%s with pid %d and priority %d exited with ",curproc->name, curproc->pid,curproc->priority) ;
+    cprintf("Turnaround Time = %d - %d = %d  || Waiting Time = %d - %d = %d\n\n", curproc->end_time, curproc->start_time, curproc->end_time - curproc->start_time, curproc->end_time - curproc->start_time, curproc->burst_time, curproc->end_time - curproc->start_time - curproc->burst_time) ;
   sched();
   panic("zombie exit");
 }
@@ -320,39 +328,55 @@ wait(void)
 //  - eventually that process transfers control
 //      via swtch back to the scheduler.
 void
-scheduler(void)
-{
-  struct proc *p;
-  struct cpu *c = mycpu();
-  c->proc = 0;
-  
-  for(;;){
-    // Enable interrupts on this processor.
-    sti();
+scheduler(void) {
+    struct proc *p ;
+    struct proc *highest_prio = 0;
+    int t = 32 ;
+    struct cpu *c = mycpu();
+    c->proc = 0;
 
-    // Loop over process table looking for process to run.
-    acquire(&ptable.lock);
-    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-      if(p->state != RUNNABLE)
-        continue;
-
-      // Switch to chosen process.  It is the process's job
-      // to release ptable.lock and then reacquire it
-      // before jumping back to us.
-      c->proc = p;
-      switchuvm(p);
-      p->state = RUNNING;
-
-      swtch(&(c->scheduler), p->context);
-      switchkvm();
-
-      // Process is done running for now.
-      // It should have changed its p->state before coming back.
-      c->proc = 0;
+    for (;;) {
+        sti();
+        acquire(&ptable.lock);
+        for (p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
+            if (p->state == RUNNABLE) {
+                //cprintf("%s with pid %d has highest prio %d compared to t = %d\n\n", p2->name, p2->pid,p2->priority, t);
+                if (p->priority < t) {
+                    t = p->priority;
+                    highest_prio = p;
+                }
+            }
+        }
+        t = 32 ;
+        for (p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
+            if (p->state == RUNNABLE && p != highest_prio) {
+                if (p->priority > 0 && p->priority <= 31) {
+                    p->priority--;
+                    //cprintf("%s got prio increased, prio = %d\n\n", p->name, p->priority) ;
+                }
+            }
+        }
+        //if(highest_prio->pid != 2 && highest_prio->pid != 3 && highest_prio->pid != 1)
+        //cprintf("%s with pid %d and prio %d was selected\n\n", highest_prio->name, highest_prio->pid, highest_prio->priority) ;
+        c->proc = highest_prio;
+        switchuvm(highest_prio);
+        highest_prio->state = RUNNING;
+        if (highest_prio->priority < 32) {
+            highest_prio->priority += 3 ;
+            if (highest_prio->priority > 31) highest_prio->priority = highest_prio->priority % 31;
+            //cprintf("%s got prio decreased, prio = %d\n\n", highest_prio->name, highest_prio->priority) ;
+        }
+        swtch(&(c->scheduler), highest_prio->context);
+        switchkvm();
+        acquire(&tickslock) ;
+        if(highest_prio->prev_tick != ticks) {
+            highest_prio->prev_tick = ticks;
+            highest_prio->burst_time++;
+        }
+        release(&tickslock) ;
+        c->proc = 0;
+        release(&ptable.lock);
     }
-    release(&ptable.lock);
-
-  }
 }
 
 // Enter scheduler.  Must hold only ptable.lock
@@ -531,4 +555,15 @@ procdump(void)
     }
     cprintf("\n");
   }
+}
+void
+set_prior(int prior_lvl){
+    struct proc *p = myproc() ;
+    if(prior_lvl <= 31 && prior_lvl >= 0){
+        p->priority = prior_lvl ;
+    }
+    else p->priority = 31 ;
+    cprintf("%s with pid %d was assigned priority %d\n\n",p->name, p->pid, p->priority) ;
+    yield() ;
+    return ;
 }

@@ -93,12 +93,17 @@ exec(char *path, char **argv)
       last = s+1;
   safestrcpy(curproc->name, last, sizeof(curproc->name));
 
+    acquire(&tickslock) ;
+    curproc->start_time = ticks ;  // get start timestamp
+    release(&tickslock) ;
+
   // Commit to the user image.
   oldpgdir = curproc->pgdir;
   curproc->pgdir = pgdir;
   curproc->sz = sz;
   curproc->tf->eip = elf.entry;  // main
   curproc->tf->esp = sp;
+  curproc->burst_time = 0 ;
   switchuvm(curproc);
   freevm(oldpgdir);
   return 0;
