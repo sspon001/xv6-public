@@ -185,6 +185,8 @@ void            switchuvm(struct proc*);
 void            switchkvm(void);
 int             copyout(pde_t*, uint, void*, uint);
 void            clearpteu(pde_t *pgdir, char *uva);
+void            setpteu(pde_t *pgdir, char *uva);
+
 
 //made mappages visible (and removed static) to facilitate implementing shm
 int

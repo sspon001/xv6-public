@@ -45,8 +45,11 @@ trap(struct trapframe *tf)
       exit();
     return;
   }
-
-  switch(tf->trapno){
+    uint sp ;
+    uint old_pg_guard ;
+    uint new_pg_guard ;
+    struct proc *p;
+    switch(tf->trapno){
   case T_IRQ0 + IRQ_TIMER:
     if(cpuid() == 0){
       acquire(&tickslock);
@@ -77,6 +80,26 @@ trap(struct trapframe *tf)
             cpuid(), tf->cs, tf->eip);
     lapiceoi();
     break;
+    case 14:
+        p = myproc() ;
+        p->stack_size += 1 ;
+        int offending_addr = rcr2() ;
+        sp = (KERNBASE - 1);
+        old_pg_guard = sp - (p->stack_size - 1) * PGSIZE ;
+        new_pg_guard = sp - p->stack_size * PGSIZE ;
+        if(offending_addr > p->sz) {
+            setpteu(p->pgdir, (char *) old_pg_guard) ;
+            cprintf("Allocated additional page to the stack, current size = %d\n\n", p->stack_size - 1) ;
+            if ((sp = allocuvm(p->pgdir, new_pg_guard, old_pg_guard)) == 0) {
+                panic("bad allocu vm\n\n");
+            }
+            clearpteu(p->pgdir, (char *) new_pg_guard);
+        }
+        else{
+            panic("no more memory") ;
+        }
+        break ;
+
 
   //PAGEBREAK: 13
   default:
