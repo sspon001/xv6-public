@@ -48,6 +48,7 @@ trap(struct trapframe *tf)
     uint sp ;
     uint old_pg_guard ;
     uint new_pg_guard ;
+    uint offending_addr ;
     struct proc *p;
     switch(tf->trapno){
   case T_IRQ0 + IRQ_TIMER:
@@ -83,7 +84,7 @@ trap(struct trapframe *tf)
     case 14:
         p = myproc() ;
         p->stack_size += 1 ;
-        int offending_addr = rcr2() ;
+        offending_addr = rcr2() ;
         sp = (KERNBASE - 1);
         old_pg_guard = sp - (p->stack_size - 1) * PGSIZE ;
         new_pg_guard = sp - p->stack_size * PGSIZE ;
